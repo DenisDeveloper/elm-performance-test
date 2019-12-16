@@ -1,23 +1,21 @@
 module Main exposing (main)
 
-import Array as A exposing (Array)
+import Basics exposing (Never, never)
 import Browser as B
 import Html exposing (Html, button, div, table, tbody, td, text, th, tr)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import List as L
+import Process as P
 import Random as R
 import String as S
-
-
-type Ms
-    = Ms Int
+import Task
 
 
 type Msg
     = GetRandomMs Int
     | Load
-    | Search Cell Int
+    | Search Cell Int Int
     | SearchAll
 
 
@@ -30,7 +28,7 @@ type alias IsSearching =
 
 
 type Cell
-    = Cell IsSearching (Maybe Options)
+    = Cell IsSearching (Maybe Int)
 
 
 type alias Model =
@@ -58,16 +56,8 @@ octoberDays =
     L.map (\n -> "Oct " ++ S.fromInt n) <| L.range 1 32
 
 
-hours =
-    L.range 0 23
-
-
 initCalendar w h =
     L.repeat h <| L.repeat w <| Cell False Nothing
-
-
-
---search model =
 
 
 initModel : Model
@@ -77,27 +67,63 @@ initModel =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( initModel, R.generate GetRandomMs randomMs )
+    ( initModel, Cmd.none )
+
+
+updateCells : Int -> Int -> List (List Cell) -> List (List Cell)
+updateCells x y xs =
+    let
+        updateCell yy row =
+            L.indexedMap
+                (\xx it ->
+                    if xx == x && yy == y then
+                        Cell True Nothing
+
+                    else
+                        it
+                )
+                row
+    in
+    L.indexedMap (\yy row -> updateCell yy row) xs
+
+
+
+--delay : Float -> Msg -> Cmd Msg
+
+
+delay time msg =
+    let
+        _ =
+            Debug.log "delay" 1
+    in
+    Task.perform (\_ -> msg) <|
+        Task.andThen (always <| Task.succeed msg) <|
+            P.sleep time
+
+
+
+--P.sleep time (\_ -> Cmd.none)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GetRandomMs ms ->
+            let
+                _ =
+                    Debug.log "delay " ms
+            in
             ( model, Cmd.none )
 
         Load ->
             ( { model | isLoaded = True }, Cmd.none )
 
-        Search (Cell isSearching options) n ->
+        Search (Cell isSearching options) x y ->
             let
                 updateCell =
-                    L.map (\row -> A.fromList row) model.cells
-
-                _ =
-                    Debug.log "search " updateCell
+                    updateCells x y model.cells
             in
-            ( model, Cmd.none )
+            ( { model | cells = updateCell }, delay 4000 msg )
 
         --SearchAll ->
         --( ms, Cmd.none )
@@ -105,6 +131,7 @@ update msg model =
             ( model, Cmd.none )
 
 
+subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.none
 
@@ -117,14 +144,34 @@ head =
     tr [] <| L.map headCell octoberDays
 
 
+bodyRow : Int -> List Cell -> Html Msg
 bodyRow hour row =
-    tr [] <| L.map (\cellValue -> cell hour cellValue) row
+    tr [] <| L.indexedMap (\x cellValue -> cell x hour cellValue) row
 
 
-cell hour cellValue =
-    td [ class "hour-cell", onClick <| Search cellValue ] [ div [ class "time" ] [ text <| S.fromInt hour ++ ":00" ] ]
+cell : Int -> Int -> Cell -> Html Msg
+cell x hour cellValue =
+    case cellValue of
+        Cell False Nothing ->
+            td [ class "hour-cell", onClick <| Search cellValue x hour ] [ div [ class "time" ] [ text <| S.fromInt hour ++ ":00" ] ]
+
+        Cell True Nothing ->
+            td [ class "hour-cell" ] [ div [ class "searching" ] [ text "..." ] ]
+
+        _ ->
+            td [] [ text "else" ]
 
 
+
+--case isSearching of
+--    True ->
+--        td [ class "hour-cell" ] [ div [ class "searching" ] [ text "..." ] ]
+--
+--    False ->
+--        td [ class "hour-cell", onClick <| Search cellValue x hour ] [ div [ class "time" ] [ text <| S.fromInt hour ++ ":00" ] ]
+
+
+body : List (List Cell) -> List (Html Msg)
 body cells =
     L.indexedMap (\hour row -> bodyRow hour row) cells
 
@@ -136,7 +183,9 @@ grid model =
 
         True ->
             [ button [ class "btn", onClick SearchAll ] [ text "Search all month" ]
-            , table [] [ tbody [] <| head :: body model.cells ]
+            , table []
+                [ tbody [] <| head :: body model.cells
+                ]
             ]
 
 
