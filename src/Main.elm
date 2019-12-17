@@ -13,29 +13,23 @@ import Task
 
 
 type Msg
-    = GetRandomMs Int
+    = StartSearch Int Int Float
+    | GetResult Int Int
+    | SearchDone Int Int Int
     | Load
     | Search Cell Int Int
     | SearchAll
 
-
-type Options
-    = Options (Maybe Int)
-
-
 type alias IsSearching =
     Bool
 
-
 type Cell
     = Cell IsSearching (Maybe Int)
-
 
 type alias Model =
     { isLoaded : Bool
     , cells : List (List Cell)
     }
-
 
 main : Program () Model Msg
 main =
@@ -47,10 +41,13 @@ main =
         }
 
 
-randomMs : R.Generator Int
+randomMs : R.Generator Float
 randomMs =
-    R.int 1 500
+    R.float 1 500
 
+rnd : R.Generator Int
+rnd =
+  R.int 1 4
 
 octoberDays =
     L.map (\n -> "Oct " ++ S.fromInt n) <| L.range 1 32
@@ -67,75 +64,79 @@ initModel =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( initModel, Cmd.none )
+  ( initModel, Cmd.none )
+
+updateNth : (b ->  b) -> Int -> List b -> List b
+updateNth f n xs =
+  L.indexedMap
+    (\i x -> if i == n then f x else x) xs
 
 
-updateCells : Int -> Int -> List (List Cell) -> List (List Cell)
-updateCells x y xs =
-    let
-        updateCell yy row =
-            L.indexedMap
-                (\xx it ->
-                    if xx == x && yy == y then
-                        Cell True Nothing
+updateNth2 : (b -> b) -> Int -> Int -> List (List b) -> List (List b)
+updateNth2 f n k xs =
+  updateNth
+    (\row -> updateNth f n row) k xs
 
-                    else
-                        it
-                )
-                row
-    in
-    L.indexedMap (\yy row -> updateCell yy row) xs
+delay : Int -> Int -> Float -> Cmd Msg
+delay x y time =
+  let
+    _ = Debug.log "f" "d"
+    -- done = R.generate (SearchDone x y) rnd
+  in
+    Task.perform (\_ -> GetResult x y) <| P.sleep time
 
-
-
---delay : Float -> Msg -> Cmd Msg
-
-
-delay time msg =
-    let
-        _ =
-            Debug.log "delay" 1
-    in
-    Task.perform (\_ -> msg) <|
-        Task.andThen (always <| Task.succeed msg) <|
-            P.sleep time
-
-
-
---P.sleep time (\_ -> Cmd.none)
-
+sAll xs =
+  let
+      _ = Debug.log "" "all"
+  in
+    L.indexedMap
+      (\i row -> L.indexedMap
+        (\j it ->
+          let
+              _ = Search it j i
+          in
+              it) row) xs
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        GetRandomMs ms ->
+        GetResult x y ->
+          (model, R.generate (SearchDone x y) rnd)
+        SearchDone x y result ->
             let
                 _ =
-                    Debug.log "delay " ms
+                    Debug.log "Foo " "ok"
+                updateCell val = Cell False (Just result)
             in
-            ( model, Cmd.none )
+            ( { model | cells = updateNth2 updateCell x y model.cells }, Cmd.none )
 
+        StartSearch x y ms ->
+            ( model, delay x y ms )
         Load ->
             ( { model | isLoaded = True }, Cmd.none )
-
         Search (Cell isSearching options) x y ->
             let
-                updateCell =
-                    updateCells x y model.cells
+                updateCell _ = Cell True Nothing
             in
-            ( { model | cells = updateCell }, delay 4000 msg )
+            ( { model | cells = updateNth2 updateCell x y model.cells },
+              R.generate (StartSearch x y) randomMs )
 
-        --SearchAll ->
+        SearchAll ->
+          let
+              _ = Debug.log "s" "all"
+              cells = sAll model.cells
+          in
+            ({model | cells = cells}, Cmd.none)
         --( ms, Cmd.none )
-        _ ->
-            ( model, Cmd.none )
+        -- _ ->
+        --     ( model, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.none
 
-
+headCell : String -> Html Msg
 headCell day =
     th [ class "day-header" ] [ text day ]
 
@@ -148,6 +149,11 @@ bodyRow : Int -> List Cell -> Html Msg
 bodyRow hour row =
     tr [] <| L.indexedMap (\x cellValue -> cell x hour cellValue) row
 
+resultSearch v =
+  if v > 3 then "good-results"
+  else if v > 1 && v <= 3 then "weak-results"
+  else if v >= 0 && v <= 1 then "bad-results"
+  else "error"
 
 cell : Int -> Int -> Cell -> Html Msg
 cell x hour cellValue =
@@ -158,6 +164,12 @@ cell x hour cellValue =
         Cell True Nothing ->
             td [ class "hour-cell" ] [ div [ class "searching" ] [ text "..." ] ]
 
+        Cell False (Just val) ->
+          td [class "hour-cell"] [
+            div [] [
+              div [] [text <| S.fromInt val],
+              div [class <| resultSearch val] [text "result"]
+            ] ]
         _ ->
             td [] [ text "else" ]
 
